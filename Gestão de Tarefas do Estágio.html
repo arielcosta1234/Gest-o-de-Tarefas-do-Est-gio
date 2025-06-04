@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-TF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planilha de Tarefas de Estagiários</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script id="initialOfflineDataScript">
+        // Os dados offline serão injetados aqui ao salvar/exportar.
+        // Exemplo: window.initialOfflineData = {"interns":[],"tasks":[],"periods":[]};
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* Tailwind gray-100 */
+        }
+        .task-badge-container { /* Novo container para o badge e o botão de excluir */
+            position: relative;
+            display: inline-block; /* Para que o container não ocupe a largura toda */
+            margin: 1px; /* Margem pequena entre tarefas */
+        }
+        .task-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px; /* Aumentado ligeiramente para acomodar o X */
+            height: 26px; /* Aumentado ligeiramente para acomodar o X */
+            border-radius: 50%;
+            color: white;
+            font-weight: bold;
+            /* margin: 2px; Removido, agora no container */
+            font-size: 0.8rem;
+            line-height: 1; /* Garante que o texto do badge esteja centrado */
+        }
+        .task-F { background-color: #10B981; /* Tailwind green-500 */ }
+        .task-M { background-color: #3B82F6; /* Tailwind blue-500 */ }
+        .task-D { background-color: #EF4444; /* Tailwind red-500 */ }
+
+        .delete-task-btn { /* Estilo para o botão 'x' de excluir tarefa */
+            position: absolute;
+            top: -5px; /* Ajuste para posicionar o 'x' */
+            right: -5px; /* Ajuste para posicionar o 'x' */
+            width: 16px;
+            height: 16px;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            border-radius: 50%;
+            border: 1px solid white;
+            font-size: 0.7rem;
+            line-height: 14px; /* Ajustar para centralizar o 'x' */
+            text-align: center;
+            cursor: pointer;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+            z-index: 10; /* Para ficar sobre o badge */
+        }
+        .delete-task-btn:hover {
+            opacity: 1;
+            background-color: rgba(0, 0, 0, 0.7);
+        }
+
+        .exam-week { background-color: #A5F3FC !important; /* Tailwind cyan-200 */ }
+        .vacation-period { background-color: #D1D5DB !important; /* Tailwind gray-300 */ text-decoration: line-through; }
+
+        .grid-container::-webkit-scrollbar { width: 8px; height: 8px; }
+        .grid-container::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
+        .grid-container::-webkit-scrollbar-thumb { background: #888; border-radius: 10px; }
+        .grid-container::-webkit-scrollbar-thumb:hover { background: #555; }
+
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); align-items: center; justify-content: center; }
+        .modal-content { background-color: #fff; padding: 20px; border-radius: 8px; width: 90%; max-width: 500px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .close-button { cursor: pointer; font-size: 1.5rem; font-weight: bold; }
+        
+        .unsaved-changes-indicator {
+            border: 2px solid #F59E0B; /* Tailwind amber-500 */
+            animation: pulse-border 1.5s infinite;
+        }
+        @keyframes pulse-border {
+            0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); } /* Tailwind amber-500 com opacidade */
+            70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+        }
+        .task-count { /* Estilo para o contador de tarefas */
+            font-size: 0.75rem; /* text-xs */
+            color: #6B7280; /* gray-500 */
+            margin-left: 4px;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="container mx-auto bg-white p-6 rounded-lg shadow-xl">
+        <header class="mb-6 text-center">
+            <h1 class="text-3xl font-bold text-gray-700">Gestor de Tarefas de Estagiários</h1>
+            <p class="text-gray-500">Organize as atividades, férias e provas dos seus estagiários de forma eficiente.</p>
+        </header>
+
+        <!-- Controles Gerais -->
+        <div class="mb-6 flex flex-wrap gap-4 justify-center md:justify-start items-center">
+            <button id="addInternBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-150">Adicionar Estagiário</button>
+            <button id="setPeriodBtn" class="bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-150">Marcar Período (Prova/Férias)</button>
+            <button id="exportOfflineHtmlBtn" class="bg-teal-500 hover:bg-teal-600 text-white font-semibold py-2 px-4 rounded-lg shadow transition duration-150">Salvar Planilha Offline (HTML)</button>
+        </div>
+
+        <!-- Controles de Mês -->
+        <div class="mb-6 flex items-center justify-between">
+            <button id="prevMonthBtn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-l-lg transition duration-150">Anterior</button>
+            <h2 id="currentMonthYear" class="text-xl font-semibold text-gray-700 mx-4"></h2>
+            <button id="nextMonthBtn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-r-lg transition duration-150">Próximo</button>
+        </div>
+        
+        <p class="text-sm text-gray-600 mb-2">Status: <span id="userIdDisplay" class="font-mono">Carregando...</span> <span id="unsavedChangesStatus" class="text-amber-600 font-semibold ml-2 hidden">(Alterações não guardadas!)</span></p>
+
+        <!-- Legenda -->
+        <div class="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+            <h3 class="text-md font-semibold text-gray-700 mb-2">Legenda:</h3>
+            <div class="flex flex-wrap gap-x-4 gap-y-2 text-sm">
+                <div><span class="task-badge task-F">F</span> - Tarefa Curta</div>
+                <div><span class="task-badge task-M">M</span> - Tarefa Média</div>
+                <div><span class="task-badge task-D">D</span> - Tarefa Longa</div>
+                <div><span class="inline-block w-4 h-4 rounded exam-week border border-gray-400 mr-1"></span> - Semana de Prova</div>
+                <div><span class="inline-block w-4 h-4 rounded vacation-period border border-gray-400 mr-1"></span> - Férias</div>
+            </div>
+        </div>
+
+        <!-- Planilha -->
+        <div id="gridContainer" class="grid-container overflow-x-auto shadow-md rounded-lg">
+            <table class="min-w-full divide-y divide-gray-200 border border-gray-300">
+                <thead id="calendarHeader" class="bg-gray-100">
+                    <!-- Cabeçalho dos dias será gerado aqui -->
+                </thead>
+                <tbody id="internsTableBody" class="bg-white divide-y divide-gray-200">
+                    <!-- Linhas dos estagiários serão geradas aqui -->
+                </tbody>
+            </table>
+        </div>
+        <p id="noInternsMessage" class="text-center text-gray-500 mt-6 hidden">Nenhum estagiário adicionado ainda. Clique em "Adicionar Estagiário" para começar.</p>
+    </div>
+
+    <!-- Modal Adicionar Estagiário -->
+    <div id="addInternModal" class="modal">
+        <div class="modal-content">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold">Adicionar Novo Estagiário</h3>
+                <span class="close-button" onclick="closeModal('addInternModal')">&times;</span>
+            </div>
+            <input type="text" id="internNameInput" placeholder="Nome do Estagiário" class="w-full p-2 border border-gray-300 rounded-md mb-4">
+            <button id="saveInternBtn" class="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg w-full">Salvar Estagiário</button>
+        </div>
+    </div>
+
+    <!-- Modal Adicionar Tarefa -->
+    <div id="addTaskModal" class="modal">
+        <div class="modal-content">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold">Adicionar/Editar Tarefas</h3>
+                <span class="close-button" onclick="closeModal('addTaskModal')">&times;</span>
+            </div>
+            <input type="hidden" id="taskInternId">
+            <input type="hidden" id="taskDate">
+            <p class="mb-2">Estagiário: <span id="modalInternName" class="font-semibold"></span></p>
+            <p class="mb-4">Data: <span id="modalDate" class="font-semibold"></span></p>
+            
+            <div class="mb-4">
+                <label for="taskTypeSelect" class="block text-sm font-medium text-gray-700 mb-1">Tipo de Tarefa:</label>
+                <select id="taskTypeSelect" class="w-full p-2 border border-gray-300 rounded-md">
+                    <option value="F">F (Curta)</option>
+                    <option value="M">M (Média)</option>
+                    <option value="D">D (Longa)</option>
+                </select>
+            </div>
+            <div class="mb-2">
+                <label for="taskDescriptionInput" class="block text-sm font-medium text-gray-700 mb-1">Descrição da Tarefa:</label>
+                <textarea id="taskDescriptionInput" placeholder="Descrição da tarefa" class="w-full p-2 border border-gray-300 rounded-md" rows="3"></textarea>
+            </div>
+            <button id="saveTaskBtn" class="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg w-full mb-2">Adicionar Tarefa</button>
+            
+            <h4 class="text-md font-semibold mt-4 mb-2">Tarefas existentes neste dia:</h4>
+            <ul id="existingTasksList" class="list-disc pl-5 text-sm max-h-32 overflow-y-auto">
+                <!-- Tarefas existentes serão listadas aqui -->
+            </ul>
+             <p id="noTasksForDay" class="text-sm text-gray-500 hidden">Nenhuma tarefa para este dia.</p>
+        </div>
+    </div>
+
+    <!-- Modal Marcar Período (Prova/Férias) -->
+    <div id="setPeriodModal" class="modal">
+        <div class="modal-content">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold">Marcar Período Especial</h3>
+                <span class="close-button" onclick="closeModal('setPeriodModal')">&times;</span>
+            </div>
+            <div class="mb-4">
+                <label for="periodInternSelect" class="block text-sm font-medium text-gray-700 mb-1">Estagiário:</label>
+                <select id="periodInternSelect" class="w-full p-2 border border-gray-300 rounded-md">
+                    <!-- Opções de estagiários serão preenchidas aqui -->
+                </select>
+            </div>
+            <div class="mb-4">
+                <label for="periodTypeSelect" class="block text-sm font-medium text-gray-700 mb-1">Tipo de Período:</label>
+                <select id="periodTypeSelect" class="w-full p-2 border border-gray-300 rounded-md">
+                    <option value="exam">Semana de Prova</option>
+                    <option value="vacation">Férias</option>
+                </select>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label for="periodStartDate" class="block text-sm font-medium text-gray-700 mb-1">Data de Início:</label>
+                    <input type="date" id="periodStartDate" class="w-full p-2 border border-gray-300 rounded-md">
+                </div>
+                <div>
+                    <label for="periodEndDate" class="block text-sm font-medium text-gray-700 mb-1">Data de Fim:</label>
+                    <input type="date" id="periodEndDate" class="w-full p-2 border border-gray-300 rounded-md">
+                </div>
+            </div>
+            <input type="text" id="periodDescriptionInput" placeholder="Descrição (opcional, ex: Provas Finais)" class="w-full p-2 border border-gray-300 rounded-md mb-4">
+            <button id="savePeriodBtn" class="bg-purple-500 hover:bg-purple-600 text-white font-semibold py-2 px-4 rounded-lg w-full">Salvar Período</button>
+            
+            <h4 class="text-md font-semibold mt-6 mb-2">Períodos existentes:</h4>
+            <div id="existingPeriodsListContainer" class="max-h-40 overflow-y-auto border rounded-md p-2">
+                 <ul id="existingPeriodsList" class="text-sm">
+                    <!-- Períodos existentes serão listados aqui -->
+                 </ul>
+                 <p id="noPeriodsExist" class="text-sm text-gray-500 hidden">Nenhum período especial cadastrado.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mensagem de Feedback/Notificação -->
+    <div id="feedbackMessage" class="fixed bottom-5 right-5 bg-gray-800 text-white p-3 rounded-lg shadow-lg hidden transition-opacity duration-300">
+        <span id="feedbackText"></span>
+    </div>
+
+    <script type="module">
+        // Importações do Firebase
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, 
+            collection, query, where, getDocs, writeBatch 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Elementos da UI Globais
+        const userIdDisplay = document.getElementById('userIdDisplay');
+        const noInternsMessage = document.getElementById('noInternsMessage');
+        const calendarHeader = document.getElementById('calendarHeader');
+        const internsTableBody = document.getElementById('internsTableBody');
+        const currentMonthYearEl = document.getElementById('currentMonthYear');
+        const exportOfflineHtmlBtn = document.getElementById('exportOfflineHtmlBtn');
+        const unsavedChangesStatusEl = document.getElementById('unsavedChangesStatus');
+        
+        // Configuração do Firebase
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-intern-tracker-offline';
+        let app, db, authService; 
+        let isFirebaseAvailable = false;
+        let isOnlineMode = false; 
+        let hasUnsavedChanges = false; 
+
+        // Dados locais
+        let currentUserId = null;
+        let currentYear, currentMonth;
+        let interns = [];
+        let tasks = [];
+        let periods = [];
+
+        // Carregar dados offline embutidos
+        if (typeof window.initialOfflineData !== 'undefined') {
+            try {
+                interns = window.initialOfflineData.interns || [];
+                tasks = window.initialOfflineData.tasks || [];
+                periods = window.initialOfflineData.periods || [];
+                console.log("Dados offline iniciais carregados do HTML.");
+                interns.forEach(i => { if (!i.id) i.id = crypto.randomUUID(); });
+                tasks.forEach(t => { if (!t.id) t.id = crypto.randomUUID(); });
+                periods.forEach(p => { if (!p.id) p.id = crypto.randomUUID(); });
+                if(userIdDisplay) userIdDisplay.textContent = "Modo Offline (Dados Carregados do Ficheiro)";
+            } catch (e) {
+                console.error("Erro ao carregar dados offline iniciais do HTML:", e);
+                if(userIdDisplay) userIdDisplay.textContent = "Modo Offline (Erro ao carregar dados)";
+            }
+        }
+
+        // Tentar inicializar Firebase
+        if (typeof __firebase_config !== 'undefined' && __firebase_config !== null && __firebase_config !== "undefined") {
+            try {
+                const firebaseConfig = JSON.parse(__firebase_config);
+                if (firebaseConfig.apiKey && firebaseConfig.projectId) { 
+                    app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    authService = getAuth(app);
+                    isFirebaseAvailable = true; 
+                    console.log("Configuração do Firebase presente.");
+                    if(userIdDisplay) userIdDisplay.textContent = "Conectando ao Firebase..."; 
+                } else {
+                    console.error("Configuração do Firebase inválida.");
+                    if(userIdDisplay && userIdDisplay.textContent === "Carregando...") userIdDisplay.textContent = "Modo Offline (Config. Firebase Inválida)";
+                }
+            } catch (e) {
+                console.error("Erro ao inicializar Firebase:", e);
+                 if(userIdDisplay && userIdDisplay.textContent === "Carregando...") userIdDisplay.textContent = "Modo Offline (Erro Firebase)";
+            }
+        } else {
+            console.warn("__firebase_config não definido. Assumindo modo offline.");
+            if(userIdDisplay && userIdDisplay.textContent === "Carregando...") userIdDisplay.textContent = "Modo Offline (Dados em memória)";
+        }
+
+        let internUnsubscribe = () => {};
+        let taskUnsubscribe = () => {};
+        let periodUnsubscribe = () => {};
+
+        // Outros Elementos da UI
+        const prevMonthBtn = document.getElementById('prevMonthBtn');
+        const nextMonthBtn = document.getElementById('nextMonthBtn');
+        const addInternBtn = document.getElementById('addInternBtn');
+        const setPeriodBtn = document.getElementById('setPeriodBtn');
+        
+        // Modais
+        const addInternModal = document.getElementById('addInternModal');
+        const internNameInput = document.getElementById('internNameInput');
+        const saveInternBtn = document.getElementById('saveInternBtn');
+
+        const addTaskModal = document.getElementById('addTaskModal');
+        const taskInternIdInput = document.getElementById('taskInternId');
+        const taskDateInput = document.getElementById('taskDate');
+        const modalInternName = document.getElementById('modalInternName');
+        const modalDate = document.getElementById('modalDate');
+        const taskTypeSelect = document.getElementById('taskTypeSelect');
+        const taskDescriptionInput = document.getElementById('taskDescriptionInput');
+        const saveTaskBtn = document.getElementById('saveTaskBtn');
+        const existingTasksList = document.getElementById('existingTasksList');
+        const noTasksForDay = document.getElementById('noTasksForDay');
+
+        const setPeriodModal = document.getElementById('setPeriodModal');
+        const periodInternSelect = document.getElementById('periodInternSelect');
+        const periodTypeSelect = document.getElementById('periodTypeSelect');
+        const periodStartDateInput = document.getElementById('periodStartDate');
+        const periodEndDateInput = document.getElementById('periodEndDate');
+        const periodDescriptionInput = document.getElementById('periodDescriptionInput');
+        const savePeriodBtn = document.getElementById('savePeriodBtn');
+        const existingPeriodsList = document.getElementById('existingPeriodsList');
+        const noPeriodsExist = document.getElementById('noPeriodsExist');
+        const existingPeriodsListContainer = document.getElementById('existingPeriodsListContainer');
+
+        const feedbackMessage = document.getElementById('feedbackMessage');
+        const feedbackText = document.getElementById('feedbackText');
+
+        function setUnsavedChanges(status) {
+            hasUnsavedChanges = status;
+            if (unsavedChangesStatusEl) unsavedChangesStatusEl.classList.toggle('hidden', !status);
+            if (exportOfflineHtmlBtn) {
+                exportOfflineHtmlBtn.classList.toggle('unsaved-changes-indicator', status);
+                exportOfflineHtmlBtn.textContent = status ? "Salvar Alterações (HTML)" : "Salvar Planilha Offline (HTML)";
+            }
+        }
+
+        function showFeedback(message, isError = false) {
+            feedbackText.textContent = message;
+            feedbackMessage.classList.remove('hidden', 'bg-red-600', 'bg-gray-800');
+            feedbackMessage.classList.add(isError ? 'bg-red-600' : 'bg-gray-800');
+            feedbackMessage.style.opacity = 1;
+            setTimeout(() => {
+                feedbackMessage.style.opacity = 0;
+                setTimeout(() => feedbackMessage.classList.add('hidden'), 300);
+            }, 3000);
+        }
+
+        function openModal(modalId) { document.getElementById(modalId).style.display = 'flex'; }
+        
+        window.closeModal = function(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+            if (modalId === 'addTaskModal') taskDescriptionInput.value = ''; 
+        }
+        
+        if (isFirebaseAvailable && authService) {
+            onAuthStateChanged(authService, async (user) => {
+                if (user) {
+                    currentUserId = user.uid;
+                    isOnlineMode = true; 
+                    console.log("Usuário autenticado com Firebase:", currentUserId);
+                    if(userIdDisplay) userIdDisplay.textContent = `Online (ID Firebase: ${currentUserId.substring(0,6)}...)`;
+                    if (window.initialOfflineData && hasUnsavedChanges) { 
+                        showFeedback("Conectado ao Firebase. Existem alterações locais não guardadas. Salve-as offline antes de sincronizar ou elas podem ser sobrescritas.", true);
+                    } else if (window.initialOfflineData) {
+                         showFeedback("Conectado ao Firebase. Dados locais podem não estar sincronizados.", true);
+                    }
+                    initializeFirebaseListeners();
+                    setUnsavedChanges(false); 
+                } else {
+                    isOnlineMode = false;
+                    console.log("Tentando login anônimo/token com Firebase...");
+                    if(userIdDisplay) userIdDisplay.textContent = "Autenticando com Firebase...";
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token && __initial_auth_token !== "undefined" && __initial_auth_token !== null) {
+                            await signInWithCustomToken(authService, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(authService);
+                        }
+                    } catch (error) {
+                        console.error("Falha na autenticação Firebase:", error);
+                        if(userIdDisplay) userIdDisplay.textContent = "Modo Offline (Falha Firebase Auth)";
+                        setCurrentDate(); renderCalendar(); 
+                        if(noInternsMessage && interns.length === 0) noInternsMessage.classList.remove('hidden');
+                    }
+                }
+            });
+        } else {
+            isOnlineMode = false;
+            console.log("Operando em modo offline. Dados em memória ou carregados do ficheiro.");
+            if(userIdDisplay && (userIdDisplay.textContent === "Carregando..." || userIdDisplay.textContent.includes("Firebase"))) {
+                userIdDisplay.textContent = window.initialOfflineData ? "Modo Offline (Dados do Ficheiro)" : "Modo Offline (Dados em Memória)";
+            }
+            setCurrentDate(); renderCalendar(); 
+            if(noInternsMessage && interns.length === 0) noInternsMessage.classList.remove('hidden');
+        }
+
+        function initializeFirebaseListeners() {
+            if (!currentUserId || !isOnlineMode || !db) return;
+            console.log("Inicializando listeners do Firebase...");
+
+            const commonErrorHandler = (collectionName, error) => {
+                console.error(`Erro Firebase (${collectionName}):`, error);
+                showFeedback(`Erro ao carregar ${collectionName} do Firebase. Verifique a conexão.`, true);
+                isOnlineMode = false; 
+                if(userIdDisplay) userIdDisplay.textContent = "Modo Offline (Erro de Leitura Firebase)";
+            };
+
+            internUnsubscribe = onSnapshot(collection(db, `artifacts/${appId}/users/${currentUserId}/interns`), (snapshot) => {
+                if (!isOnlineMode && hasUnsavedChanges) { console.log("Firebase snapshot recebido para estagiários, mas há alterações locais não guardadas. Ignorando snapshot."); return; }
+                interns = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                populatePeriodInternSelect(); renderCalendar(); 
+                if(noInternsMessage) noInternsMessage.classList.toggle('hidden', interns.length === 0);
+                updateExistingPeriodsList(); 
+                setUnsavedChanges(false);
+            }, (error) => commonErrorHandler("estagiários", error));
+
+            taskUnsubscribe = onSnapshot(collection(db, `artifacts/${appId}/users/${currentUserId}/tasks`), (snapshot) => {
+                if (!isOnlineMode && hasUnsavedChanges) { console.log("Firebase snapshot recebido para tarefas, mas há alterações locais não guardadas. Ignorando snapshot."); return; }
+                tasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderCalendar(); 
+                setUnsavedChanges(false);
+            }, (error) => commonErrorHandler("tarefas", error));
+            
+            periodUnsubscribe = onSnapshot(collection(db, `artifacts/${appId}/users/${currentUserId}/periods`), (snapshot) => {
+                if (!isOnlineMode && hasUnsavedChanges) { console.log("Firebase snapshot recebido para períodos, mas há alterações locais não guardadas. Ignorando snapshot."); return; }
+                periods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderCalendar(); 
+                updateExistingPeriodsList();
+                setUnsavedChanges(false);
+            }, (error) => commonErrorHandler("períodos", error));
+            
+            setCurrentDate();
+        }
+
+        function setCurrentDate(year, month) {
+            const today = new Date();
+            currentYear = year !== undefined ? year : today.getFullYear();
+            currentMonth = month !== undefined ? month : today.getMonth(); 
+            if(currentMonthYearEl) currentMonthYearEl.textContent = `${new Date(currentYear, currentMonth).toLocaleString('pt-BR', { month: 'long', year: 'numeric' })}`;
+        }
+
+        function renderCalendar() {
+            if (!internsTableBody || !calendarHeader || !currentMonthYearEl) return;
+            
+            currentMonthYearEl.textContent = `${new Date(currentYear, currentMonth).toLocaleString('pt-BR', { month: 'long', year: 'numeric' })}`;
+            calendarHeader.innerHTML = '';
+            internsTableBody.innerHTML = '';
+
+            const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+            let headerRowHTML = '<tr><th class="sticky left-0 bg-gray-100 z-10 p-2 border border-gray-300 text-xs md:text-sm font-semibold text-gray-600 w-32 md:w-40">Estagiário</th>';
+            const daysOfWeek = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+            for (let i = 1; i <= daysInMonth; i++) {
+                const dayName = daysOfWeek[new Date(currentYear, currentMonth, i).getDay()];
+                headerRowHTML += `<th class="p-1 md:p-2 border border-gray-300 text-xs md:text-sm font-medium text-gray-500 text-center"><div>${i}</div><div class="text-xs text-gray-400">${dayName}</div></th>`;
+            }
+            headerRowHTML += '</tr>';
+            calendarHeader.innerHTML = headerRowHTML;
+
+            const sortedInternsForDisplay = [...interns].sort((a, b) => String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase()));
+
+            if (sortedInternsForDisplay.length === 0) {
+                 if(noInternsMessage) {
+                    noInternsMessage.classList.remove('hidden');
+                    noInternsMessage.textContent = isOnlineMode ? "Nenhum estagiário adicionado ainda." : "Nenhum estagiário. Adicione ou carregue de um ficheiro.";
+                 }
+            } else {
+                 if(noInternsMessage) noInternsMessage.classList.add('hidden');
+            }
+
+            sortedInternsForDisplay.forEach(intern => {
+                // Contar tarefas do estagiário no mês atual
+                let tasksInCurrentMonthForIntern = 0;
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    tasksInCurrentMonthForIntern += tasks.filter(t => t.internId === intern.id && t.date === dateStr).length;
+                }
+
+                let internRowHTML = `<tr>
+                                    <td class="sticky left-0 bg-white z-10 p-2 border border-gray-300 text-sm font-medium text-gray-800 w-32 md:w-40 whitespace-nowrap">
+                                        <div>${intern.name} <span class="task-count">(${tasksInCurrentMonthForIntern})</span></div>
+                                        <div class="mt-1">
+                                            <button class="text-red-500 hover:text-red-700 text-xs" onclick="window.deleteIntern('${intern.id}', '${intern.name}')" title="Remover estagiário">🗑️</button>
+                                        </div>
+                                    </td>`;
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const currentDateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    let cellClass = '', periodTooltip = '';
+                    const activePeriod = periods.find(p => p.internId === intern.id && currentDateStr >= p.startDate && currentDateStr <= p.endDate);
+                    if (activePeriod) {
+                        cellClass = activePeriod.type === 'exam' ? 'exam-week' : 'vacation-period';
+                        periodTooltip = `${activePeriod.type === 'exam' ? 'Prova' : 'Férias'}: ${activePeriod.description || ''}`;
+                    }
+                    const dayTasks = tasks.filter(t => t.internId === intern.id && t.date === currentDateStr);
+                    let tasksHtml = dayTasks.map(task => `
+                        <div class="task-badge-container">
+                            <span class="task-badge task-${task.taskCode}" title="${task.description || task.taskCode}">${task.taskCode}</span>
+                            <span class="delete-task-btn" onclick="event.stopPropagation(); window.deleteTask('${task.id}')" title="Remover esta tarefa">×</span>
+                        </div>
+                    `).join('');
+                    internRowHTML += `<td class="p-1 border h-16 relative ${cellClass}" data-intern-id="${intern.id}" data-date="${currentDateStr}" data-intern-name="${intern.name}" title="${periodTooltip}" onclick="window.openAddTaskModal('${intern.id}', '${currentDateStr}', '${intern.name}')"><div class="flex flex-wrap justify-center items-center">${tasksHtml}</div></td>`;
+                }
+                internRowHTML += '</tr>';
+                internsTableBody.innerHTML += internRowHTML;
+            });
+        }
+        
+        window.deleteIntern = async (internId, internName) => {
+            const confirmDeleteModal = document.createElement('div');
+            confirmDeleteModal.className = 'modal';
+            confirmDeleteModal.style.display = 'flex';
+            confirmDeleteModal.innerHTML = `
+                <div class="modal-content">
+                    <h3 class="text-xl font-semibold mb-4">Confirmar Exclusão</h3>
+                    <p class="mb-4">Tem certeza que deseja remover o estagiário "${internName}" e todos os seus tarefas e períodos associados?</p>
+                    <div class="flex justify-end gap-3">
+                        <button id="cancelDeleteBtnModalInternDel" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-lg">Cancelar</button>
+                        <button id="confirmDeleteBtnModalInternDel" class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg">Remover</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(confirmDeleteModal);
+
+            document.getElementById('cancelDeleteBtnModalInternDel').onclick = () => {
+                document.body.removeChild(confirmDeleteModal);
+            };
+
+            document.getElementById('confirmDeleteBtnModalInternDel').onclick = async () => {
+                document.body.removeChild(confirmDeleteModal);
+                if (isOnlineMode && currentUserId && db) {
+                    try {
+                        const batch = writeBatch(db);
+                        batch.delete(doc(db, `artifacts/${appId}/users/${currentUserId}/interns`, internId));
+                        const tasksSnapshot = await getDocs(query(collection(db, `artifacts/${appId}/users/${currentUserId}/tasks`), where("internId", "==", internId)));
+                        tasksSnapshot.forEach(doc => batch.delete(doc.ref));
+                        const periodsSnapshot = await getDocs(query(collection(db, `artifacts/${appId}/users/${currentUserId}/periods`), where("internId", "==", internId)));
+                        periodsSnapshot.forEach(doc => batch.delete(doc.ref));
+                        await batch.commit();
+                        showFeedback(`Estagiário ${internName} removido (Online).`);
+                        setUnsavedChanges(false); 
+                    } catch (error) { showFeedback("Erro ao remover estagiário (Online).", true); }
+                } else { 
+                    interns = interns.filter(i => i.id !== internId);
+                    tasks = tasks.filter(t => t.internId !== internId);
+                    periods = periods.filter(p => p.internId !== internId);
+                    renderCalendar(); populatePeriodInternSelect(); updateExistingPeriodsList();
+                    showFeedback(`Estagiário ${internName} removido (Offline).`);
+                    setUnsavedChanges(true);
+                }
+            };
+        };
+
+        if(prevMonthBtn) prevMonthBtn.addEventListener('click', () => { 
+            currentMonth--;
+            if (currentMonth < 0) { currentMonth = 11; currentYear--; }
+            setCurrentDate(currentYear, currentMonth); 
+            renderCalendar();
+        });
+        if(nextMonthBtn) nextMonthBtn.addEventListener('click', () => { 
+            currentMonth++;
+            if (currentMonth > 11) { currentMonth = 0; currentYear++; }
+            setCurrentDate(currentYear, currentMonth); 
+            renderCalendar();
+        });
+
+        if(addInternBtn) addInternBtn.addEventListener('click', () => { 
+            internNameInput.value = '';
+            openModal('addInternModal');
+            internNameInput.focus();
+        });
+
+        if(saveInternBtn) saveInternBtn.addEventListener('click', async () => {
+            const name = internNameInput.value.trim();
+            if (!name) { showFeedback("Insira o nome do estagiário.", true); return; }
+
+            if (isOnlineMode && currentUserId && db) {
+                try {
+                    await addDoc(collection(db, `artifacts/${appId}/users/${currentUserId}/interns`), { name });
+                    showFeedback(`Estagiário ${name} adicionado (Online).`);
+                    setUnsavedChanges(false);
+                } catch (error) { showFeedback("Erro ao adicionar estagiário (Online).", true); }
+            } else { 
+                const newIntern = { id: crypto.randomUUID(), name };
+                interns.push(newIntern);
+                renderCalendar(); populatePeriodInternSelect();
+                showFeedback(`Estagiário ${name} adicionado (Offline).`);
+                setUnsavedChanges(true);
+            }
+            window.closeModal('addInternModal'); 
+        });
+        
+        window.openAddTaskModal = (internId, date, internName) => { 
+            taskInternIdInput.value = internId;
+            taskDateInput.value = date; 
+            modalInternName.textContent = internName;
+            modalDate.textContent = new Date(date + 'T00:00:00').toLocaleDateString('pt-BR');
+            taskDescriptionInput.value = ''; 
+            taskTypeSelect.value = 'F'; 
+
+            existingTasksList.innerHTML = '';
+            const dayTasks = tasks.filter(t => t.internId === internId && t.date === date); 
+            noTasksForDay.classList.toggle('hidden', dayTasks.length > 0);
+            dayTasks.forEach(task => {
+                const li = document.createElement('li');
+                li.className = 'flex justify-between items-center py-1';
+                li.innerHTML = `<span><span class="task-badge task-${task.taskCode}">${task.taskCode}</span> ${task.description || ''}</span> <button class="text-red-500" onclick="window.deleteTask('${task.id}')">🗑️</button>`;
+                existingTasksList.appendChild(li);
+            });
+            openModal('addTaskModal');
+        };
+        
+        window.deleteTask = async (taskId) => { 
+            // Adicionado event.stopPropagation() se o clique vier do botão 'x' no calendário
+            // No entanto, como deleteTask pode ser chamado do modal também, não adicionamos aqui diretamente.
+            // A chamada no HTML do botão 'x' já tem event.stopPropagation().
+
+            if (isOnlineMode && currentUserId && db) {
+                try {
+                    await deleteDoc(doc(db, `artifacts/${appId}/users/${currentUserId}/tasks`, taskId));
+                    showFeedback("Tarefa removida (Online).");
+                    setUnsavedChanges(false);
+                } catch (error) { showFeedback("Erro ao remover tarefa (Online).", true); }
+            } else { 
+                tasks = tasks.filter(t => t.id !== taskId);
+                showFeedback("Tarefa removida (Offline).");
+                setUnsavedChanges(true);
+            }
+            // Se o modal de adicionar tarefa estiver aberto e for do mesmo dia/estagiário, atualiza-o.
+            // Senão, apenas re-renderiza o calendário.
+            if (addTaskModal.style.display === 'flex' && 
+                taskInternIdInput.value === tasks.find(t => t.id === taskId)?.internId && // Verifica se o estagiário é o mesmo
+                taskDateInput.value === tasks.find(t => t.id === taskId)?.date) { // Verifica se a data é a mesma
+                
+                const internId = taskInternIdInput.value;
+                const date = taskDateInput.value; 
+                const internName = interns.find(i => i.id === internId)?.name || '';
+                window.openAddTaskModal(internId, date, internName); 
+            } else {
+                renderCalendar(); 
+            }
+        };
+
+        if(saveTaskBtn) saveTaskBtn.addEventListener('click', async () => { 
+            const internId = taskInternIdInput.value;
+            const date = taskDateInput.value; 
+            const taskCode = taskTypeSelect.value;
+            const description = taskDescriptionInput.value.trim();
+            if (!internId || !date || !taskCode) { showFeedback("Preencha os campos da tarefa e selecione uma data no calendário.", true); return; }
+            const newTask = { internId, date, taskCode, description, id: crypto.randomUUID() };
+
+            if (isOnlineMode && currentUserId && db) {
+                try {
+                    const { id, ...taskDataForFirebase } = newTask; 
+                    await addDoc(collection(db, `artifacts/${appId}/users/${currentUserId}/tasks`), taskDataForFirebase);
+                    showFeedback(`Tarefa ${taskCode} adicionada (Online).`);
+                    setUnsavedChanges(false);
+                } catch (error) { showFeedback("Erro ao adicionar tarefa (Online).", true); }
+            } else { 
+                tasks.push(newTask);
+                showFeedback(`Tarefa ${taskCode} adicionada (Offline).`);
+                setUnsavedChanges(true);
+            }
+            taskDescriptionInput.value = ''; 
+            window.openAddTaskModal(internId, date, modalInternName.textContent); 
+        });
+        
+        function populatePeriodInternSelect() { 
+            if (!periodInternSelect) return;
+            const currentVal = periodInternSelect.value;
+            periodInternSelect.innerHTML = '<option value="">Selecione um estagiário</option>';
+            const sortedInternsForSelect = [...interns].sort((a, b) => String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase()));
+            sortedInternsForSelect.forEach(intern => {
+                const option = document.createElement('option');
+                option.value = intern.id;
+                option.textContent = intern.name;
+                periodInternSelect.appendChild(option);
+            });
+            if (interns.find(i => i.id === currentVal)) {
+                periodInternSelect.value = currentVal;
+            }
+        }
+        
+        function updateExistingPeriodsList() { 
+            if (!existingPeriodsList) return;
+            existingPeriodsList.innerHTML = '';
+            const sortedPeriodsForDisplay = [...periods].sort((a,b) => {
+                const internNameA = interns.find(i=>i.id===a.internId)?.name || 'zzzz'; 
+                const internNameB = interns.find(i=>i.id===b.internId)?.name || 'zzzz';
+                const nameComparison = String(internNameA).toLowerCase().localeCompare(String(internNameB).toLowerCase());
+                if (nameComparison !== 0) return nameComparison;
+                return new Date(a.startDate) - new Date(b.startDate);
+            });
+            
+            noPeriodsExist.classList.toggle('hidden', sortedPeriodsForDisplay.length > 0);
+            if (existingPeriodsListContainer) existingPeriodsListContainer.classList.toggle('hidden', sortedPeriodsForDisplay.length === 0);
+
+            sortedPeriodsForDisplay.forEach(period => {
+                const internName = interns.find(i => i.id === period.internId)?.name || 'Desconhecido';
+                const typeText = period.type === 'exam' ? 'Prova' : 'Férias';
+                const li = document.createElement('li');
+                li.className = 'flex justify-between items-center py-1 border-b last:border-b-0';
+                li.innerHTML = `<div><strong>${internName}</strong> - ${typeText}: ${new Date(period.startDate+'T00:00:00').toLocaleDateString('pt-BR')} a ${new Date(period.endDate+'T00:00:00').toLocaleDateString('pt-BR')} ${period.description ? `<em>(${period.description})</em>`:''}</div> <button class="text-red-500" onclick="window.deletePeriod('${period.id}')">🗑️</button>`;
+                existingPeriodsList.appendChild(li);
+            });
+        }
+
+        window.deletePeriod = async (periodId) => {
+            if (isOnlineMode && currentUserId && db) {
+                try {
+                    await deleteDoc(doc(db, `artifacts/${appId}/users/${currentUserId}/periods`, periodId));
+                    showFeedback("Período removido (Online).");
+                    setUnsavedChanges(false);
+                } catch (error) { showFeedback("Erro ao remover período (Online).", true); }
+            } else { 
+                periods = periods.filter(p => p.id !== periodId);
+                updateExistingPeriodsList(); renderCalendar();
+                showFeedback("Período removido (Offline).");
+                setUnsavedChanges(true);
+            }
+        };
+
+        if(setPeriodBtn) setPeriodBtn.addEventListener('click', () => { 
+            if (interns.length === 0) { showFeedback("Adicione estagiários primeiro.", true); return; }
+            populatePeriodInternSelect();
+            updateExistingPeriodsList();
+            periodInternSelect.value = '';
+            periodTypeSelect.value = 'exam';
+            const today = new Date().toISOString().split('T')[0];
+            periodStartDateInput.value = today;
+            periodEndDateInput.value = today;
+            periodDescriptionInput.value = '';
+            openModal('setPeriodModal');
+        });
+
+        if(savePeriodBtn) savePeriodBtn.addEventListener('click', async () => {
+            const internId = periodInternSelect.value;
+            const type = periodTypeSelect.value;
+            const startDate = periodStartDateInput.value;
+            const endDate = periodEndDateInput.value;
+            const description = periodDescriptionInput.value.trim();
+            if (!internId || !startDate || !endDate || new Date(startDate) > new Date(endDate)) {
+                showFeedback("Verifique os campos: estagiário, datas válidas.", true); return;
+            }
+            const newPeriod = { internId, type, startDate, endDate, description, id: crypto.randomUUID() };
+
+            if (isOnlineMode && currentUserId && db) {
+                try {
+                    const { id, ...periodDataForFirebase } = newPeriod;
+                    await addDoc(collection(db, `artifacts/${appId}/users/${currentUserId}/periods`), periodDataForFirebase);
+                    showFeedback(`Período marcado (Online).`);
+                    setUnsavedChanges(false);
+                } catch (error) { showFeedback("Erro ao marcar período (Online).", true); }
+            } else { 
+                periods.push(newPeriod);
+                updateExistingPeriodsList(); renderCalendar();
+                showFeedback(`Período marcado (Offline).`);
+                setUnsavedChanges(true);
+            }
+            periodDescriptionInput.value = ''; 
+        });
+
+        if(exportOfflineHtmlBtn) exportOfflineHtmlBtn.addEventListener('click', () => {
+            const currentData = { interns, tasks, periods };
+            const jsonDataString = JSON.stringify(currentData);
+            const newDocument = document.implementation.createHTMLDocument(document.title);
+            newDocument.documentElement.innerHTML = document.documentElement.innerHTML;
+            let dataScriptElement = newDocument.getElementById('initialOfflineDataScript');
+            if (dataScriptElement) {
+                dataScriptElement.textContent = `window.initialOfflineData = ${jsonDataString};`;
+            } else { 
+                const head = newDocument.querySelector('head');
+                const scriptTag = newDocument.createElement('script');
+                scriptTag.id = 'initialOfflineDataScript';
+                scriptTag.textContent = `window.initialOfflineData = ${jsonDataString};`;
+                head.insertBefore(scriptTag, head.firstChild); 
+            }
+            const fullHtml = "<!DOCTYPE html>\n" + newDocument.documentElement.outerHTML;
+            const blob = new Blob([fullHtml], { type: 'text/html' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'planilha_estagiarios_offline_salva.html';
+            document.body.appendChild(link); 
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+            showFeedback("Planilha salva como novo ficheiro HTML. Abra o ficheiro descarregado para continuar.");
+            setUnsavedChanges(false); 
+        });
+        
+        window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { ['addInternModal', 'addTaskModal', 'setPeriodModal'].forEach(window.closeModal); }});
+        window.addEventListener('beforeunload', (event) => { if (hasUnsavedChanges) { event.preventDefault(); event.returnValue = ''; return ''; } });
+        window.addEventListener('beforeunload', () => { [internUnsubscribe, taskUnsubscribe, periodUnsubscribe].forEach(unsub => typeof unsub === 'function' && unsub()); });
+        
+        // Inicialização final
+        setUnsavedChanges(false); 
+
+    </script>
+</body>
+</html>
